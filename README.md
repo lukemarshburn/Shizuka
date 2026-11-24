@@ -1,4 +1,8 @@
 This Fork Helped Me Get Aptx Adpative on my Samsung S26 Ultra. Claude Opus 5.5 was used for helping me adapt Skizuka to my DFRoot Jailbroken S26 Ultra. 
+<img width="1440" height="1382" alt="Screenshot_20261124_134527_KernelSU" src="https://github.com/user-attachments/assets/49612d83-660a-4354-80c9-21214f7279cb" />
+<img width="1440" height="3120" alt="Screenshot_20261124_134224_KernelSU" src="https://github.com/user-attachments/assets/4607a62b-522a-43a6-a89d-a909b3f435b6" />
+<img width="1440" height="3120" alt="Screenshot_20261124_134211_SmartControlPlus" src="https://github.com/user-attachments/assets/7dc7edba-d62c-4cd3-a3d2-0217da938169" />
+
 # Shizuka
 
 Bluetooth extensions with shared Android settings/status tools and explicit, verified native device backends. Codec selection, sample rate, bit depth, preferred transport and device permissions follow Android's Bluetooth state. The module no longer replays a private 48 kHz/HQ preference when devices connect.
