@@ -2,6 +2,7 @@
 """Rebuild the Bluetooth APK edits and external policy from local stock inputs."""
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -13,7 +14,14 @@ from pathlib import Path
 from shizuka.artifacts import NATIVE_VALIDATION, write_metadata
 from shizuka.java import java_tools
 from shizuka.profiles import load_profile
-from shizuka.project import ANDROID, android_sources_fingerprint, digest, inputs_dir, option
+from shizuka.project import (
+    ANDROID,
+    android_sources_fingerprint,
+    digest,
+    executable,
+    inputs_dir,
+    option,
+)
 from shizuka.tuning import verify_generated
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,9 +38,9 @@ def sdk_paths(require_apk=True):
     sdk = Path(sdk).expanduser()
     tools = sdk / "build-tools" / option("BUILD_TOOLS", "35.0.0", legacy="S25_BUILD_TOOLS")
     android = sdk / "platforms/android-35/android.jar"
-    required = [tools / "d8", android]
+    required = [executable(tools / "d8"), android]
     if require_apk:
-        required.append(tools / "zipalign")
+        required.append(executable(tools / "zipalign"))
     for path in required:
         if not path.is_file():
             raise SystemExit(f"Required Android SDK file is missing: {path}")
@@ -44,6 +52,12 @@ def check_inputs():
 
 
 def build_apk(tools):
+    patches = load_profile().apk_patches
+    if not patches.is_file():
+        raise SystemExit(
+            f"No reviewed Bluetooth.apk patch definitions for this profile ({patches}). "
+            "They are generated against that profile's own stock APK."
+        )
     apktool = os.environ.get("APKTOOL") or shutil.which("apktool")
     if not apktool:
         raise SystemExit("apktool 3.0.3 is required on PATH (or set APKTOOL).")
@@ -59,23 +73,25 @@ def build_apk(tools):
     edits = json.loads(load_profile().apk_patches.read_text())
     for patch in edits["files"]:
         path = decoded / patch["path"]
-        if digest(path) != patch["before_sha256"]:
+        # apktool writes the platform line separator; reviewed digests are over LF text.
+        stock = path.read_bytes().replace(b"\r\n", b"\n")
+        if hashlib.sha256(stock).hexdigest() != patch["before_sha256"]:
             raise SystemExit(f"Decoded class does not match the reviewed input: {patch['path']}")
-        lines = path.read_text().splitlines(keepends=True)
+        lines = stock.decode("utf-8").splitlines(keepends=True)
         for edit in reversed(patch["edits"]):
             start = edit["line"]
             lines[start : start + edit["delete"]] = edit["insert"].splitlines(keepends=True)
-        path.write_text("".join(lines))
+        path.write_bytes("".join(lines).encode("utf-8"))
         if digest(path) != patch["after_sha256"]:
             raise SystemExit(f"APK patch output mismatch: {patch['path']}")
     raw = BUILD / "Bluetooth-unaligned.apk"
     output = BUILD / "patched-Bluetooth.apk"
     subprocess.run([apktool, "b", "--copy-original", "-o", str(raw), str(decoded)], check=True)
     subprocess.run(
-        [str(tools / "zipalign"), "-P", "16", "-f", "4", str(raw), str(output)],
+        [str(executable(tools / "zipalign")), "-P", "16", "-f", "4", str(raw), str(output)],
         check=True,
     )
-    subprocess.run([str(tools / "zipalign"), "-c", "-P", "16", "4", str(output)], check=True)
+    subprocess.run([str(executable(tools / "zipalign")), "-c", "-P", "16", "4", str(output)], check=True)
     subprocess.run([sys.executable, str(ROOT / "tests/apk_offload_hq_check.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "tests/apk_le_route_check.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "tests/apk_handoff_check.py")], check=True)
@@ -112,7 +128,7 @@ def build_policy(tools, android):
     )
     subprocess.run(
         [
-            str(tools / "d8"),
+            str(executable(tools / "d8")),
             "--min-api",
             "34",
             "--lib",
@@ -172,7 +188,7 @@ def main():
         shutil.copy2(BUILD / "policy-dex/classes.dex", bundle / "policy.dex")
         shutil.copy2(BUILD / "status-dex/classes.dex", bundle / "status.dex")
         shutil.copy2(ROOT / "LICENSE", bundle / "LICENSE")
-        (bundle / "policy.sha256").write_text(digest(bundle / "policy.dex") + "\n")
+        (bundle / "policy.sha256").write_text(digest(bundle / "policy.dex") + "\n", newline="\n")
         (bundle / "README.txt").write_text(
             "Shizuka Android tools (Android 14+ / KernelSU root).\nRun config.sh device active get or status.sh.\nThis folder is a command-line tool bundle, not a KernelSU installation ZIP.\nNative patch activation and vendor controller extensions require a verified device backend.\n"
         )

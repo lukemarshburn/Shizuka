@@ -2,9 +2,15 @@
 /** Private codec IDs and mode words are meaningful only for their verified backend. */
 final class CodecPresentation {
     static final String SAMSUNG_DZIF = "samsung-sm-s931z-dzif";
+    /** Same private Adaptive/Lossless IDs as DZIF; private aptX LL is not enabled. */
+    static final String SAMSUNG_S948U1 = "samsung-sm-s948u1-bzja";
+
+    private static boolean privateIds(String profile) {
+        return SAMSUNG_DZIF.equals(profile) || SAMSUNG_S948U1.equals(profile);
+    }
 
     static boolean losslessSelection(String profile, boolean le, int type) {
-        return !le && SAMSUNG_DZIF.equals(profile) && type == 12;
+        return !le && privateIds(profile) && type == 12;
     }
 
     static String name(String profile, boolean le, int type, String systemName) {
@@ -14,7 +20,7 @@ final class CodecPresentation {
     }
 
     static String mode(String profile, int type, long value) {
-        if (!SAMSUNG_DZIF.equals(profile)) return null;
+        if (!privateIds(profile)) return null;
         if (type == 12) return "Lossless request";
         if (type != 7) return null;
         if (value == 4096) return "HQ";

@@ -1,0 +1,5 @@
+# Device-side files run under Android's sh/toybox and are copied into the module zip
+# as checked out: keep them LF even where core.autocrlf=true.
+module/** text eol=lf
+*.sh text eol=lf
+tools/android-app/gradlew text eol=lf

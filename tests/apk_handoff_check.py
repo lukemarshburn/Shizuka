@@ -6,11 +6,14 @@ import hashlib
 import itertools
 import json
 import re
+import sys
 from pathlib import Path
 
 from apk_le_route_check import method
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+from shizuka.profiles import load_profile  # noqa: E402
 REL = "smali/com/android/bluetooth/le_audio/LeAudioService.smali"
 HELPER = "s25PrepareClassicHandoff(Landroid/bluetooth/BluetoothDevice;)V"
 
@@ -91,7 +94,7 @@ def execute(body, fixture):
 
 
 def main():
-    profile = json.loads((ROOT / "profiles/samsung-sm-s931z-dzif/bluetooth-apk.json").read_text())
+    profile = json.loads(load_profile().apk_patches.read_text(encoding="utf-8"))
     entry = next(item for item in profile["files"] if item["path"] == REL)
     insertion = next(
         edit["insert"] for edit in entry["edits"] if ".method private " + HELPER in edit["insert"]
@@ -146,7 +149,7 @@ def main():
         cases += 1
     decoded = ROOT / "build/bluetooth-apk" / REL
     if decoded.is_file():
-        text = decoded.read_text()
+        text = decoded.read_text(encoding="utf-8")
         assert hashlib.sha256(text.encode()).hexdigest() == entry["after_sha256"]
         assert method(text, HELPER) == body
         setter = method(text, "setConnectionPolicy(Landroid/bluetooth/BluetoothDevice;I)Z")

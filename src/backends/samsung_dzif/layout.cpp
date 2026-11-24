@@ -2,12 +2,13 @@
 #include "layout.h"
 #include "settings.h"
 #include "coexist.h"
+#include "addresses.h"
 namespace s25 {
 static uint32_t u32(const uint8_t *p) {
     return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }
 bool adaptive_valid(const uint8_t *cfg) {
-    if (!cfg || u32(cfg) != 9 || u32(cfg + 0x58) != 4)
+    if (!cfg || u32(cfg) != S25_HAL_ADAPTIVE_TYPE || u32(cfg + 0x58) != 4)
         return false;
     const AdaptiveConfig *a = reinterpret_cast<const AdaptiveConfig *>(cfg + 0x18);
     if ((a->sample_rate != 48000 && a->sample_rate != 96000 &&

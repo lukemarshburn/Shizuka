@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "addresses.h"
 #ifndef S25_HAL_ONLY
 #include "coexist.h"
 #include "aptx_ll_native.h"
@@ -55,7 +56,7 @@ extern "C" uint8_t s25_adaptive_set(void *obj, const uint8_t *peer, bool capabil
     if (!s25::proxy_choose((capability || explicit_request) ? cap_slot : peer[12], rate, mode,
                            &flags))
         return 0x29;
-    auto original = (uint8_t (*)(void *, const uint8_t *, bool, uint8_t *))(base() + 0x977290);
+    auto original = (uint8_t (*)(void *, const uint8_t *, bool, uint8_t *))(base() + S25_ADDR_APTX_HD_SET_CONFIG);
     uint8_t result = original(obj, peer, capability, out);
     fix(obj);
     if (result == 0) {
@@ -71,7 +72,7 @@ extern "C" uint8_t s25_adaptive_set(void *obj, const uint8_t *peer, bool capabil
 extern "C" bool s25_adaptive_peer(void *obj, const uint8_t *peer) {
     if (!s25::proxy_codec(peer))
         return false;
-    auto original = (bool (*)(void *, const uint8_t *))(base() + 0x9777b4);
+    auto original = (bool (*)(void *, const uint8_t *))(base() + S25_ADDR_APTX_HD_SET_PEER);
     uint64_t saved = *(uint64_t *)((uint8_t *)obj + 0x110);
     bool result = original(obj, peer);
     fix(obj);
@@ -90,7 +91,7 @@ extern "C" void *s25_factory(int index, int priority) {
         return tramp_factory(index, priority);
     {
         char text[128];
-        auto prop = (int (*)(const char *, char *, const char *))(base() + 0xdf4e84);
+        auto prop = (int (*)(const char *, char *, const char *))(base() + S25_ADDR_PROPERTY_GET);
         prop("bluetooth.a2dp.source.aptx_adaptive_priority.config", text, "6001");
         unsigned v = 0;
         for (unsigned i = 0; text[i]; i++) {
@@ -100,11 +101,11 @@ extern "C" void *s25_factory(int index, int priority) {
         }
         priority = (int)v;
     }
-    auto allocate = (void *(*)(size_t))(base() + 0xe62580);
+    auto allocate = (void *(*)(size_t))(base() + S25_ADDR_OPERATOR_NEW);
     void *obj = allocate(0x1e0);
     if (!obj)
         return nullptr;
-    ((void (*)(void *, int))(base() + 0x9771c0))(obj, priority);
+    ((void (*)(void *, int))(base() + S25_ADDR_APTX_HD_CTOR))(obj, priority);
     while (__atomic_test_and_set(&vlock, __ATOMIC_ACQUIRE)) {
     }
     if (!adaptive_vtable[2]) {

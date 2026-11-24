@@ -69,6 +69,33 @@ class Profiles(unittest.TestCase):
         )
         self.assertEqual(set(values.splitlines()), set(profile.data["payloads"].values()))
 
+    def test_s948u1_profile_matches_runtime_paths_payloads_and_layout(self):
+        from shizuka.backends.samsung_dzif import LAYOUTS, layout_for
+
+        profile = load_profile("samsung-sm-s948u1-bzja")
+        backend = ROOT / "module/profiles" / (profile.runtime_id + ".sh")
+        script = (
+            f'. "{backend}"\nprintf "%s\\n" "$NATIVE" "$HAL" "$APK" "$OFFLOAD" "$FRAMEWORK" '
+            '"$NATIVE_PAYLOAD" "$HAL_PAYLOAD" "$APK_PAYLOAD" "$QHS_SUPPORTED" "$AUDIO_HAL_FACTORY"\n'
+        )
+        values = subprocess.check_output(["sh", "-c", script], text=True).splitlines()
+        self.assertEqual(set(values[:5]), {target["path"] for target in profile.targets})
+        self.assertEqual(
+            set(values[5:8]) | {"runtime.prop"}, set(profile.data["payloads"].values())
+        )
+        self.assertEqual(values[8], "false")
+        self.assertTrue(values[9].startswith("android.hardware.bluetooth.audio."))
+        layout = layout_for(profile)
+        self.assertEqual(
+            {name for name, _ in layout.spec.values()},
+            {t["local_file"] for t in profile.targets if t["role"] == "patch"},
+        )
+        # Layouts never fall back to one another.
+        self.assertNotEqual(layout, layout_for(self.profile))
+        self.assertEqual(set(LAYOUTS), {self.profile.id, profile.id})
+        with self.assertRaises(ValueError):
+            layout_for(DeviceProfile(self.d, {**profile.data, "id": "unreviewed"}))
+
     def test_unknown_backend_and_profile_are_rejected(self):
         for key in ["id", "driver", "runtime_profile"]:
             with self.subTest(key=key):

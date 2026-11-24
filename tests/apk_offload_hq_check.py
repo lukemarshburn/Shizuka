@@ -5,9 +5,12 @@
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+from shizuka.profiles import load_profile  # noqa: E402
 REL = "smali/com/android/bluetooth/a2dp/A2dpService.smali"
 METHOD = ".method public checkHqCodecState(Landroid/bluetooth/BluetoothDevice;)Z"
 
@@ -82,11 +85,11 @@ def main():
     patch = next(
         x
         for x in json.loads(
-            (ROOT / "profiles/samsung-sm-s931z-dzif/bluetooth-apk.json").read_text()
+            load_profile().apk_patches.read_text(encoding="utf-8")
         )["files"]
         if x["path"] == REL
     )
-    text = (ROOT / "build/bluetooth-apk" / REL).read_text()
+    text = (ROOT / "build/bluetooth-apk" / REL).read_text(encoding="utf-8")
     (edit,) = patch["edits"]
     prefix = edit["insert"]
     if digest(text) == patch["before_sha256"]:

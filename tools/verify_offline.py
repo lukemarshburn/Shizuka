@@ -42,7 +42,11 @@ def verify_native(profile):
         raise ValueError("Set JAVA_HOME to a JDK, or SHIZUKA_JNI_INCLUDE to JNI headers")
     jni = [
         "-I" + str(jni_root),
-        "-I" + str(jni_root / ("darwin" if sys.platform == "darwin" else "linux")),
+        "-I"
+        + str(
+            jni_root
+            / {"darwin": "darwin", "win32": "win32"}.get(sys.platform, "linux")
+        ),
     ]
     results = []
     for name, files, flags in backend.host_cases(jni):

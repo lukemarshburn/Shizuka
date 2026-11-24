@@ -65,8 +65,8 @@ def main():
             "*.jsonl",
         ),
     )
-    (stage / "device-profile").write_text(profile.runtime_id + "\n")
-    (stage / "inputs.sha256").write_text(profile.input_manifest())
+    (stage / "device-profile").write_text(profile.runtime_id + "\n", newline="\n")
+    (stage / "inputs.sha256").write_text(profile.input_manifest(), newline="\n")
     shutil.copy2(ROOT / "LICENSE", stage / "LICENSE")
     (stage / "payload").mkdir()
     (stage / "proofs").mkdir()
@@ -78,15 +78,15 @@ def main():
         shutil.copy2(path, stage / "payload" / path.name)
         entries.append(f"{entry['output_sha256']} {path.name}\n")
     hashes = "".join(entries)
-    (stage / "payloads.sha256").write_text(hashes)
-    (stage / "proofs/offline-ready").write_text(sha(hashes.encode()) + "\n")
+    (stage / "payloads.sha256").write_text(hashes, newline="\n")
+    (stage / "proofs/offline-ready").write_text(sha(hashes.encode()) + "\n", newline="\n")
     shutil.copy2(BUILD / "status-dex/classes.dex", stage / "status.dex")
     shutil.copy2(BUILD / "policy-dex/classes.dex", stage / "policy.dex")
-    (stage / "policy.sha256").write_text(sha((stage / "policy.dex").read_bytes()) + "\n")
+    (stage / "policy.sha256").write_text(sha((stage / "policy.dex").read_bytes()) + "\n", newline="\n")
     shutil.copy2(BUILD / "dsp-capture", stage / "dsp-capture")
-    (stage / "dsp-capture.sha256").write_text(diagnostic["output_sha256"] + "\n")
+    (stage / "dsp-capture.sha256").write_text(diagnostic["output_sha256"] + "\n", newline="\n")
     shutil.copy2(settings_apk, stage / "settings.apk")
-    (stage / "settings.sha256").write_text(settings["apk_sha256"] + "\n")
+    (stage / "settings.sha256").write_text(settings["apk_sha256"] + "\n", newline="\n")
     for src, name in [
         (ROOT / "config/config.example.conf", "config.example.conf"),
         (ROOT / "config/CONFIG-GUIDE.txt", "CONFIG-GUIDE.txt"),

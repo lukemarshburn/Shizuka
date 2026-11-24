@@ -18,6 +18,28 @@ VERSION_NAME = "0.10.0-test"
 PACKAGE = "dev.shizuka.settings"
 
 
+def executable(path):
+    """Resolve a tool path that carries a .exe/.bat/.cmd suffix on Windows."""
+    path = Path(path)
+    if path.is_file() or os.name != "nt":
+        return path
+    for suffix in (".exe", ".bat", ".cmd"):
+        if path.with_name(path.name + suffix).is_file():
+            return path.with_name(path.name + suffix)
+    return path
+
+
+def gradlew():
+    """gradlew is a POSIX script; on Windows run it through Git for Windows' bash."""
+    script = str(APP / "gradlew")
+    if os.name != "nt":
+        return [script]
+    shell = shutil.which("bash") or str(Path("C:/Program Files/Git/bin/bash.exe"))
+    if not Path(shell).is_file() and not shutil.which(shell):
+        raise SystemExit("gradlew needs a POSIX shell on Windows (Git for Windows bash).")
+    return [shell, script]
+
+
 def settings_sources_fingerprint():
     """Stable fingerprint independent of machine-local Gradle state/signing keys."""
     files = [Path(__file__).resolve()]
@@ -41,7 +63,7 @@ def main():
         raise SystemExit("Set ANDROID_SDK_ROOT or pass --sdk.")
     sdk = Path(args.sdk).expanduser().resolve()
     tools = sdk / "build-tools/35.0.0"
-    for file in (tools / "apksigner", sdk / "platforms/android-35/android.jar"):
+    for file in (executable(tools / "apksigner"), sdk / "platforms/android-35/android.jar"):
         if not file.is_file():
             raise SystemExit(f"Required Android SDK file is missing: {file}")
     BUILD.mkdir(exist_ok=True)
@@ -49,7 +71,7 @@ def main():
     if args.gradle_user_home:
         env["GRADLE_USER_HOME"] = str(Path(args.gradle_user_home).expanduser().resolve())
     before = settings_sources_fingerprint()
-    subprocess.run([str(APP / "gradlew"), "--no-daemon", "--console=plain", "assembleRelease"], cwd=APP, env=env, check=True)
+    subprocess.run([*gradlew(), "--no-daemon", "--console=plain", "assembleRelease"], cwd=APP, env=env, check=True)
     unsigned = BUILD / "settings-app-gradle/outputs/apk/release/android-app-release-unsigned.apk"
     if not unsigned.is_file():
         candidates = list((BUILD / "settings-app-gradle/outputs/apk/release").glob("*-release-unsigned.apk"))
@@ -59,15 +81,15 @@ def main():
     key = Path(env.get("SHIZUKA_SETTINGS_KEYSTORE", str(BUILD / "settings-signing/shizuka-settings.jks"))).expanduser()
     key.parent.mkdir(parents=True, exist_ok=True)
     java_home = env.get("JAVA_HOME")
-    keytool = str(Path(java_home) / "bin/keytool") if java_home else shutil.which("keytool")
+    keytool = str(executable(Path(java_home) / "bin/keytool")) if java_home else shutil.which("keytool")
     if not keytool:
         raise SystemExit("A JDK with keytool is required.")
     if not key.exists():
         subprocess.run([keytool, "-genkeypair", "-keystore", str(key), "-storepass", "shizuka-local-build", "-keypass", "shizuka-local-build", "-alias", "settings", "-keyalg", "RSA", "-keysize", "3072", "-validity", "10000", "-dname", "CN=Shizuka Settings Local Build"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         key.chmod(0o600)
     output = BUILD / "Shizuka-settings.apk"
-    subprocess.run([str(tools / "apksigner"), "sign", "--ks", str(key), "--ks-key-alias", "settings", "--ks-pass", "pass:shizuka-local-build", "--key-pass", "pass:shizuka-local-build", "--out", str(output), str(unsigned)], check=True, env=env)
-    subprocess.run([str(tools / "apksigner"), "verify", "--verbose", str(output)], check=True, env=env)
+    subprocess.run([str(executable(tools / "apksigner")), "sign", "--ks", str(key), "--ks-key-alias", "settings", "--ks-pass", "pass:shizuka-local-build", "--key-pass", "pass:shizuka-local-build", "--out", str(output), str(unsigned)], check=True, env=env)
+    subprocess.run([str(executable(tools / "apksigner")), "verify", "--verbose", str(output)], check=True, env=env)
     after = settings_sources_fingerprint()
     if before != after:
         raise SystemExit("Settings sources changed during the build. Rebuild the companion.")

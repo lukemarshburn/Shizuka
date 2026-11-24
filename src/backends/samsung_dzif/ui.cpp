@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "addresses.h"
 #ifndef S25_HAL_ONLY
 #include <jni.h>
 #include "layout.h"
@@ -50,7 +51,7 @@ static uintptr_t base() { return (uintptr_t)&s25_anchor - 0x2000000; }
 static constexpr jint kAdaptiveIndex = 7;
 static constexpr jlong kAdaptiveId = 0xad00d7ffLL;
 static jobject named_type(JNIEnv *env, int index) {
-    auto *meta = (uintptr_t *)(base() + 0xeae890);
+    auto *meta = (uintptr_t *)(base() + S25_ADDR_CODEC_TYPE_META);
     if (!env || !meta[0] || !meta[1])
         return nullptr;
     jstring name = env->NewStringUTF(
@@ -86,7 +87,7 @@ extern "C" jobjectArray s25_supported(JNIEnv *env, jobject object) {
     jobjectArray result = tramp_supported(env, object);
     if (!result)
         return result;
-    auto *v = (s25::Vector *)(base() + 0xeae6c0);
+    auto *v = (s25::Vector *)(base() + S25_ADDR_CODEC_TYPE_VECTOR);
     uintptr_t count = ((uintptr_t)v->end - (uintptr_t)v->begin) / 128;
     if (!v->begin || count > 32 || (uintptr_t)v->end < (uintptr_t)v->begin)
         return result;
@@ -110,7 +111,7 @@ extern "C" jobjectArray s25_supported(JNIEnv *env, jobject object) {
             env->DeleteLocalRef(type);
         }
     if (!found) {
-        auto *meta = (uintptr_t *)(base() + 0xeae890);
+        auto *meta = (uintptr_t *)(base() + S25_ADDR_CODEC_TYPE_META);
         jobjectArray extended = env->NewObjectArray(length + 2, (jclass)meta[0], nullptr);
         if (!extended)
             return result;
@@ -132,7 +133,7 @@ extern "C" jobjectArray s25_supported(JNIEnv *env, jobject object) {
         env->DeleteLocalRef(result);
         result = extended;
     } else {
-        auto *meta = (uintptr_t *)(base() + 0xeae890);
+        auto *meta = (uintptr_t *)(base() + S25_ADDR_CODEC_TYPE_META);
         jobjectArray extended = env->NewObjectArray(length + 1, (jclass)meta[0], nullptr);
         if (!extended)
             return result;
@@ -149,9 +150,15 @@ extern "C" jobjectArray s25_supported(JNIEnv *env, jobject object) {
         env->DeleteLocalRef(result);
         result = extended;
     }
+#ifdef S25_NO_LL
+    // This backend never initializes the private LL slot; do not advertise it.
+    (void)found_ll;
+    return result;
+#else
     if (found_ll)
         return result;
-    auto *llmeta = (uintptr_t *)(base() + 0xeae890);
+#endif
+    auto *llmeta = (uintptr_t *)(base() + S25_ADDR_CODEC_TYPE_META);
     jsize llcount = env->GetArrayLength(result);
     jobjectArray with_ll = env->NewObjectArray(llcount + 1, (jclass)llmeta[0], nullptr);
     if (!with_ll)

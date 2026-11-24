@@ -97,12 +97,24 @@ def offline_sources_fingerprint():
     return source_fingerprint(sources)
 
 
+def executable(path):
+    """Resolve a tool path that carries a .exe/.bat/.cmd suffix on Windows."""
+    path = Path(path)
+    if path.is_file() or os.name != "nt":
+        return path
+    for suffix in (".exe", ".bat", ".cmd"):
+        candidate = path.with_name(path.name + suffix)
+        if candidate.is_file():
+            return candidate
+    return path
+
+
 def ndk_bin():
     configured = option("NDK_BIN", legacy="S25_NDK_BIN")
     if not configured:
         raise ValueError("Set SHIZUKA_NDK_BIN to the Android NDK LLVM prebuilt bin directory.")
     directory = Path(configured).expanduser()
-    if not (directory / "clang++").is_file():
+    if not executable(directory / "clang++").is_file():
         raise ValueError(f"clang++ was not found in {directory}")
     return directory
 

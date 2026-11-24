@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Samsung DZIF native ABI, hook offsets and patch construction. Not a generic device driver."""
+"""Samsung native ABI (DZIF payload), per-firmware hook layouts and patch construction.
+
+Not a generic device driver: every supported firmware has an explicit, reviewed
+Layout keyed by its exact profile id. There is no fallback between layouts."""
 
 import hashlib
 import io
 import json
 import struct
 import subprocess
+from dataclasses import dataclass
 
 from elftools.elf.elffile import ELFFile
 
@@ -66,16 +70,151 @@ def read_vaddr(elf, addr, size):
     raise RuntimeError("address not in file")
 
 
+def b_ne(addr, target):
+    """Encode `b.ne target` at addr (imm19)."""
+    return 0x54000001 | ((((target - addr) // 4) & 0x7FFFF) << 5)
+
+
+NOP = 0xD503201F
+
+
+@dataclass(frozen=True)
+class LlVeneer:
+    """Private-LL (index 9) dispatch veneer: gate is replaced by a branch to the veneer,
+    which sends 9 to `match` and replays the original `cmp w8, #replay_cmp` otherwise."""
+
+    suffix: str
+    replay_cmp: int
+    gate: int
+    match: int
+    resume: int
+
+
+@dataclass(frozen=True)
+class Layout:
+    profile_id: str
+    spec: dict
+    malloc_got: int
+    ll_veneers: tuple
+    # (vaddr, replacement word, manifest hook name), applied to the native library.
+    word_patches: tuple
+    # Extra compiler definitions per flavor ("native" / "hal").
+    defines: dict
+    dispatch_check: str
+
+
+DZIF = Layout(
+    profile_id="sm-s931z-dzif-aptx-experiment",
+    spec=SPEC,
+    malloc_got=0xEA65E0,
+    ll_veneers=(
+        LlVeneer("hal", 5, 0x8561C4, 0x8561E0, 0x8561C8),
+        LlVeneer("offload", 2, 0x64961C, 0x649658, 0x649620),
+    ),
+    word_patches=(
+        (0x95E6D4, 0x71002AFF, "initialize-ll-source-slot9"),
+        (0x95C238, NOP, "enable-hd-slot"),
+        # The stock Samsung dispatcher only routes indices 2/3 to the aptX converter.
+        # Here w8 is bounded to 4 or 5; preserve LDAC 4, route private Adaptive 5.
+        (0x856458, b_ne(0x856458, 0x8561E0), "dispatch-private-adaptive-to-converter"),
+        # The offload builder has the same bounded 4/5 branch; 5 needs HD framing
+        # before s25_specific supplies Adaptive's real controller configuration.
+        (0x649638, b_ne(0x649638, 0x649724), "dispatch-private-adaptive-offload-builder"),
+    ),
+    defines={},
+    dispatch_check="dispatch_emulation_check.py",
+)
+
+# SM-S948U1 / S948U1UEU5BZJA (S26 Ultra). Mapped from the stock image's MiniDebugInfo
+# symbols; see docs/S26-ULTRA-MAPPING.md. The vendor audio HAL is AOSP-only (no SEH
+# audio provider is registered), so the seh_aidl converter hooks are replaced by one
+# getHalCodecConfiguration hook, and private aptX LL (slot 9, SEH dispatch) is not
+# enabled: no slot-9 initialization, no LL veneers, no LL codec advertised.
+S948U1_BZJA = Layout(
+    profile_id="sm-s948u1-bzja-aptx-experiment",
+    spec={
+        "native": (
+            "libbluetooth_jni.so",
+            {
+                "prs_cfg": 0x9BACA0,
+                "bld_cfg": 0x9BA4A8,
+                "hal_codec": 0x8499C4,
+                "specific": 0x95A604,
+                "vendor": 0x9EA488,
+                "new_type": 0x3FB8E4,
+                "supported": 0x3F5DE4,
+                "prepare": 0x3F78C4,
+                "callback": 0x3F8228,
+                "user": 0x95A9EC,
+                "factory": 0x95A32C,
+                "supported_ss": 0x95C8B8,
+                "source_index": 0x95D088,
+                "init_codec": 0x9608D0,
+                "vendor_source_index": 0x9715F8,
+                "provider_index": 0x7FFF9C,
+                "type_eq": 0x95B384,
+                "equal": 0x95ABDC,
+                "vendor_type_eq": 0x970FA0,
+                "hd_type_eq": 0x976B18,
+                "hd_equal": 0x976C28,
+                "ll_selectable": 0x64AF14,
+                "ll_sep_index": 0x653778,
+                "ll_msg_send": 0x9B8CB8,
+            },
+        ),
+        "hal": ("libbluetooth_audio_session_aidl.so", {"validate": 0x2FF60}),
+    },
+    malloc_got=0xEA65E0,
+    ll_veneers=(),
+    word_patches=(
+        (0x95C8F4, NOP, "enable-hd-slot"),
+        (0x649638, b_ne(0x649638, 0x649724), "dispatch-private-adaptive-offload-builder"),
+    ),
+    defines={
+        "native": (
+            "-DS25_AOSP_HAL",
+            "-DS25_NO_LL",
+            "-DS25_HAL_ADAPTIVE_TYPE=8",
+            "-DS25_ADDR_OPERATOR_NEW=0xe62c00",
+            "-DS25_ADDR_APTX_CTOR=0x973614",
+            "-DS25_ADDR_APTX_HD_CTOR=0x97787c",
+            "-DS25_ADDR_APTX_HD_SET_CONFIG=0x97794c",
+            "-DS25_ADDR_APTX_HD_SET_PEER=0x977e70",
+            "-DS25_ADDR_FIND_PEER=0x654d68",
+            "-DS25_ADDR_PEER_CACHE=0xf14368",
+            "-DS25_ADDR_ALARM_NEW=0xdeef1c",
+            "-DS25_ADDR_ALARM_SET=0xdefaec",
+            "-DS25_ADDR_FREE_GOT=0xea6568",
+            "-DS25_ADDR_PROPERTY_GET=0xdf5544",
+            "-DS25_ADDR_CODEC_TYPE_META=0xeae890",
+            "-DS25_ADDR_CODEC_TYPE_VECTOR=0xeae6c0",
+            "-DS25_ADDR_BTA_AV_CO=0xf14360",
+            "-DS25_ADDR_ACTIVE_PEER_CODEC=0x64ac98",
+        ),
+        "hal": ("-DS25_HAL_ADAPTIVE_TYPE=8",),
+    },
+    dispatch_check="s948u1_sites_check.py",
+)
+
+LAYOUTS = {layout.profile_id: layout for layout in (DZIF, S948U1_BZJA)}
+
+
+def layout_for(profile):
+    layout = LAYOUTS.get(profile.id)
+    if layout is None:
+        raise ValueError("No reviewed Samsung layout for profile " + profile.id)
+    return layout
+
+
 def build(profile):
-    if profile.id != "sm-s931z-dzif-aptx-experiment":
-        raise ValueError("Samsung DZIF offsets cannot be used with another profile")
+    layout = layout_for(profile)
     BASE = inputs_dir()
     NDK = ndk_bin()
     options = native_options()
     BUILD.mkdir(parents=True, exist_ok=True)
     targets = {target["local_file"]: target for target in profile.targets}
     results = []
-    for flavor, (name, functions) in SPEC.items():
+    for flavor, (name, functions) in layout.spec.items():
         reloc_adrps = {}
         original = BASE / name
         if hashlib.sha256(original.read_bytes()).hexdigest() != targets[name]["sha256"]:
@@ -115,22 +254,16 @@ def build(profile):
                     f" b 0x{addr + 8:x}",
                 ]
             if flavor == "native":
-                assembly += [
-                    ".global s25_ll_dispatch_hal",
-                    "s25_ll_dispatch_hal:",
-                    " cmp w8, #9",
-                    " .inst 0x54000041",
-                    " .inst 0x14000000",
-                    " cmp w8, #5",
-                    " .inst 0x14000000",
-                    ".global s25_ll_dispatch_offload",
-                    "s25_ll_dispatch_offload:",
-                    " cmp w8, #9",
-                    " .inst 0x54000041",
-                    " .inst 0x14000000",
-                    " cmp w8, #2",
-                    " .inst 0x14000000",
-                ]
+                for veneer in layout.ll_veneers:
+                    assembly += [
+                        f".global s25_ll_dispatch_{veneer.suffix}",
+                        f"s25_ll_dispatch_{veneer.suffix}:",
+                        " cmp w8, #9",
+                        " .inst 0x54000041",
+                        " .inst 0x14000000",
+                        f" cmp w8, #{veneer.replay_cmp}",
+                        " .inst 0x14000000",
+                    ]
             (BUILD / (flavor + "-tramp.S")).write_text("\n".join(assembly) + "\n")
         exe = BUILD / (flavor + "-payload.elf")
         cmd = [
@@ -151,7 +284,7 @@ def build(profile):
             "-mbranch-protection=standard",
             "-mno-outline-atomics",
             "-nostdlib",
-            "-DS25_MALLOC_GOT=0xea65e0",
+            f"-DS25_MALLOC_GOT={layout.malloc_got:#x}",
         ]
         cmd += [
             "-DS25_RATE=" + str(options["RATE"]),
@@ -160,6 +293,7 @@ def build(profile):
         ]
         if flavor == "hal":
             cmd += ["-DS25_HAL_ONLY"]
+        cmd += list(layout.defines.get(flavor, ()))
         cmd += [
             str(DRIVER_SRC / "payload.cpp"),
             str(DRIVER_SRC / "ui.cpp"),
@@ -208,10 +342,8 @@ def build(profile):
                             eraw[off - 4 : off] = struct.pack("<I", word)
                         break
         if flavor == "native":
-            for suffix, match, resume in [
-                ("hal", 0x8561E0, 0x8561C8),
-                ("offload", 0x649658, 0x649620),
-            ]:
+            for veneer in layout.ll_veneers:
+                suffix, match, resume = veneer.suffix, veneer.match, veneer.resume
                 addr = ss["s25_ll_dispatch_" + suffix]
                 for sg in ee.iter_segments():
                     if (
@@ -266,7 +398,8 @@ def build(profile):
                     }
                 )
             if flavor == "native":
-                for addr, suffix in [(0x8561C4, "hal"), (0x64961C, "offload")]:
+                for veneer in layout.ll_veneers:
+                    addr, suffix = veneer.gate, veneer.suffix
                     data = branch(addr, syms["s25_ll_dispatch_" + suffix])
                     patch(addr, data)
                     patches.append(
@@ -276,50 +409,10 @@ def build(profile):
                             "hook": "dispatch-private-ll-" + suffix,
                         }
                     )
-                addr = 0x95E6D4
-                data = struct.pack("<I", 0x71002AFF)
-                patch(addr, data)
-                patches.append(
-                    {
-                        "vaddr": hex(addr),
-                        "replacement": data.hex(),
-                        "hook": "initialize-ll-source-slot9",
-                    }
-                )
-                addr = 0x95C238
-                data = struct.pack("<I", 0xD503201F)
-                patch(addr, data)
-                patches.append(
-                    {
-                        "vaddr": hex(addr),
-                        "replacement": data.hex(),
-                        "hook": "enable-hd-slot",
-                    }
-                )
-                # The stock Samsung dispatcher only routes indices 2/3 to the aptX converter.
-                # Here w8 is bounded to 4 or 5; preserve LDAC 4, route private Adaptive 5.
-                addr = 0x856458
-                data = struct.pack("<I", 0x54000001 | ((((0x8561E0 - addr) // 4) & 0x7FFFF) << 5))
-                patch(addr, data)
-                patches.append(
-                    {
-                        "vaddr": hex(addr),
-                        "replacement": data.hex(),
-                        "hook": "dispatch-private-adaptive-to-converter",
-                    }
-                )
-                # The offload builder has the same bounded 4/5 branch; 5 needs HD framing
-                # before s25_specific supplies Adaptive's real controller configuration.
-                addr = 0x649638
-                data = struct.pack("<I", 0x54000001 | ((((0x649724 - addr) // 4) & 0x7FFFF) << 5))
-                patch(addr, data)
-                patches.append(
-                    {
-                        "vaddr": hex(addr),
-                        "replacement": data.hex(),
-                        "hook": "dispatch-private-adaptive-offload-builder",
-                    }
-                )
+                for addr, word, hook in layout.word_patches:
+                    data = struct.pack("<I", word)
+                    patch(addr, data)
+                    patches.append({"vaddr": hex(addr), "replacement": data.hex(), "hook": hook})
 
             # Append a readable program-header mapping; preserve all original virtual addresses.
             def align(n):
@@ -454,7 +547,8 @@ def build(profile):
     runtime.write_text(
         "persist.vendor.qcom.bluetooth.aptxadaptiver2_1_support="
         + ("true" if int(str(options["R2"])) >= 2 else "false")
-        + "\n"
+        + "\n",
+        newline="\n",  # read on the device by an exact shell `case` match
     )
     results.append(
         {
@@ -513,6 +607,5 @@ def host_cases(jni):
 def verify_dispatch(profile):
     import sys
 
-    if profile.id != "sm-s931z-dzif-aptx-experiment":
-        raise ValueError("Dispatch verification requires the DZIF profile")
-    subprocess.run([sys.executable, str(ROOT / "tests/dispatch_emulation_check.py")], check=True)
+    check = layout_for(profile).dispatch_check
+    subprocess.run([sys.executable, str(ROOT / "tests" / check)], check=True)

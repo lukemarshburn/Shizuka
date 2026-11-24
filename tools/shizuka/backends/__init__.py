@@ -12,7 +12,11 @@ class BackendSpec:
 
 
 BACKENDS = {
-    "samsung-dzif": BackendSpec("samsung_dzif", frozenset({"sm-s931z-dzif-aptx-experiment"})),
+    # One Samsung payload ABI; each profile id has its own reviewed layout in samsung_dzif.py.
+    "samsung-dzif": BackendSpec(
+        "samsung_dzif",
+        frozenset({"sm-s931z-dzif-aptx-experiment", "sm-s948u1-bzja-aptx-experiment"}),
+    ),
 }
 
 

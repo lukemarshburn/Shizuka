@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "addresses.h"
 #include "aptx_ll_native.h"
 #ifndef S25_HAL_ONLY
 extern "C" __attribute__((visibility("hidden"))) void s25_anchor();
@@ -300,11 +301,11 @@ static bool peer(void *codec, const uint8_t *c) {
     return true;
 }
 void *factory(int priority) {
-    auto allocate = (void *(*)(size_t))(base() + 0xe62580);
+    auto allocate = (void *(*)(size_t))(base() + S25_ADDR_OPERATOR_NEW);
     void *codec = allocate(0x1e0);
     if (!codec)
         return nullptr;
-    ((void (*)(void *, int))(base() + 0x972f58))(codec, priority == 0 ? 1800 : priority);
+    ((void (*)(void *, int))(base() + S25_ADDR_APTX_CTOR))(codec, priority == 0 ? 1800 : priority);
     {
         Lock lock(&table_lock);
         if (!table[2]) {
@@ -326,7 +327,7 @@ static bool view(void *codec, uint8_t *storage) {
     auto *p = (uint8_t *)codec;
     if (!proxy(p + 0x1a0))
         return false;
-    ((void (*)(void *, int))(base() + 0x972f58))(storage, *(int *)(p + 0x58));
+    ((void (*)(void *, int))(base() + S25_ADDR_APTX_CTOR))(storage, *(int *)(p + 0x58));
     for (unsigned off = 0x60; off <= 0x160; off += 64) {
         memcpy(storage + off, p + off, 64);
         *(uint32_t *)(storage + off) = 2;
@@ -474,8 +475,8 @@ extern "C" void s25_ll_selectable(void *self, void *peer) {
 }
 extern "C" uint8_t s25_ll_sep_index(const uint8_t *address) {
     uintptr_t b = (uintptr_t)&s25_anchor - 0x2000000;
-    auto find = (void *(*)(void *, const uint8_t *))(b + 0x654d68);
-    void *cache = *(void **)(b + 0xf14368);
+    auto find = (void *(*)(void *, const uint8_t *))(b + S25_ADDR_FIND_PEER);
+    void *cache = *(void **)(b + S25_ADDR_PEER_CACHE);
     uint8_t index;
     void *peer = cache && address ? find(cache, address) : nullptr;
     return s25::ll::endpoint_index(peer, &index) ? index : tramp_ll_sep_index(address);

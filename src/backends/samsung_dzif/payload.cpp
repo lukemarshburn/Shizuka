@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "addresses.h"
 #include "protocol.h"
 #include "layout.h"
 #include "settings.h"
@@ -225,29 +226,11 @@ extern "C" void s25_bld_cfg(uint8_t **p, void *cfg) {
     memcpy(*p, ll_output, ll_size);
     *p += ll_size;
 }
-extern "C" bool s25_to_hal(uint8_t *out, void *codec) {
-    if (*(uint32_t *)((uint8_t *)codec + 0x30) == s25::ll::kPrivateIndex)
-        return s25::ll::hal_view(codec, out, tramp_to_hal);
-    s25::ll::deactivate();
-    if (*(uint32_t *)((uint8_t *)codec + 0x30) != s25::kPrivateAdaptive)
-        return tramp_to_hal(out, codec);
-    // Reconstruct a real HD ABI view solely for the stock converter; never mutate the live object.
-    alignas(16) uint8_t view[0x1e0]{};
-    auto ctor = (void (*)(void *, int))(base() + 0x9771c0);
-    ctor(view, *(int *)((uint8_t *)codec + 0x58));
-    for (unsigned off = 0x60; off <= 0x160; off += 0x40) {
-        memcpy(view + off, (uint8_t *)codec + off, 64);
-        *(uint32_t *)(view + off) = 3;
-    }
-    for (unsigned off = 0x1a0; off <= 0x1c8; off += 20) {
-        memcpy(view + off, (uint8_t *)codec + off, 20);
-        if (s25::proxy_codec(view + off))
-            memset(view + off + 10, 0, 4);
-    }
-    bool ok = tramp_to_hal(out, view);
-    auto destroy = (void (*)(void *))(*(uintptr_t **)view)[0];
-    destroy(view);
-    if (!ok || *(uint32_t *)out != 4)
+// Rewrites the stock converter's aptX HD result (codecType 4, aptxConfig tag 3) for
+// `codec` into the private Adaptive selection. The SEH and AOSP CodecConfiguration
+// layouts are identical at every offset used here (verified from both writeToParcel).
+static bool finish_adaptive(uint8_t *out, void *codec) {
+    if (*(uint32_t *)out != 4)
         return false;
     uint8_t selected[43];
     if (!s25::proxy_selection((uint8_t *)codec + 0x1a0, selected))
@@ -289,9 +272,60 @@ extern "C" bool s25_to_hal(uint8_t *out, void *codec) {
     a->fade_ms = 255;
     a->stream = {stream, stream + 11, stream + 11};
     *(uint32_t *)(out + 0x58) = 4;
-    *(uint32_t *)out = 9;
+    *(uint32_t *)out = S25_HAL_ADAPTIVE_TYPE;
     return s25::adaptive_valid(out);
 }
+#ifndef S25_AOSP_HAL
+extern "C" bool s25_to_hal(uint8_t *out, void *codec) {
+    if (*(uint32_t *)((uint8_t *)codec + 0x30) == s25::ll::kPrivateIndex)
+        return s25::ll::hal_view(codec, out, tramp_to_hal);
+    s25::ll::deactivate();
+    if (*(uint32_t *)((uint8_t *)codec + 0x30) != s25::kPrivateAdaptive)
+        return tramp_to_hal(out, codec);
+    // Reconstruct a real HD ABI view solely for the stock converter; never mutate the live object.
+    alignas(16) uint8_t view[0x1e0]{};
+    auto ctor = (void (*)(void *, int))(base() + S25_ADDR_APTX_HD_CTOR);
+    ctor(view, *(int *)((uint8_t *)codec + 0x58));
+    for (unsigned off = 0x60; off <= 0x160; off += 0x40) {
+        memcpy(view + off, (uint8_t *)codec + off, 64);
+        *(uint32_t *)(view + off) = 3;
+    }
+    for (unsigned off = 0x1a0; off <= 0x1c8; off += 20) {
+        memcpy(view + off, (uint8_t *)codec + off, 20);
+        if (s25::proxy_codec(view + off))
+            memset(view + off + 10, 0, 4);
+    }
+    bool ok = tramp_to_hal(out, view);
+    auto destroy = (void (*)(void *))(*(uintptr_t **)view)[0];
+    destroy(view);
+    return ok && finish_adaptive(out, codec);
+}
+#else
+// AOSP path: aidl::a2dp::codec::getHalCodecConfiguration(const ahal_codec_configuration &,
+// CodecConfiguration *). Its input is flattened: codec index at +0x20 and the btav
+// sample rate / bits / channel enums at +0x28 / +0x2c / +0x30. The caller's object
+// spans 0x64 bytes (start_session_delayed writes up to +0x60); 0x68 stays in its frame.
+extern "C" __attribute__((visibility("hidden"))) bool tramp_hal_codec(const uint8_t *, uint8_t *);
+static constexpr size_t kAhalCopy = 0x68;
+extern "C" bool s25_hal_codec(const uint8_t *ahal, uint8_t *out) {
+    if (!ahal || !out || *(const int32_t *)(ahal + 0x20) != s25::kPrivateAdaptive)
+        return tramp_hal_codec(ahal, out);
+    // Stock code reaches the same object this way (BtaAvCo, recursive_mutex).
+    auto current = (void *(*)(void *))(base() + S25_ADDR_ACTIVE_PEER_CODEC);
+    void *codec = current((void *)(base() + S25_ADDR_BTA_AV_CO));
+    if (!codec || *(uint32_t *)((uint8_t *)codec + 0x30) != s25::kPrivateAdaptive)
+        return false;
+    // The stock aptX HD branch fills transport fields (bitrate, peer MTU) for a copy;
+    // the Adaptive rate, depth and mode come from the selection in finish_adaptive.
+    alignas(16) uint8_t view[kAhalCopy];
+    memcpy(view, ahal, kAhalCopy);
+    *(int32_t *)(view + 0x20) = 3; // BTAV_A2DP_CODEC_INDEX_SOURCE_APTX_HD
+    *(int32_t *)(view + 0x28) = 2; // BTAV_A2DP_CODEC_SAMPLE_RATE_48000
+    *(int32_t *)(view + 0x2c) = 2; // BTAV_A2DP_CODEC_BITS_PER_SAMPLE_24
+    *(int32_t *)(view + 0x30) = 2; // BTAV_A2DP_CODEC_CHANNEL_MODE_STEREO
+    return tramp_hal_codec(view, out) && finish_adaptive(out, codec);
+}
+#endif
 extern "C" bool s25_adjust_offload(uint8_t *config) {
     if (*(uint32_t *)config != 8)
         return false;
@@ -331,16 +365,20 @@ extern "C" bool s25_specific(void *codec, uint8_t *config) {
     }
     return ok;
 }
+#ifndef S25_AOSP_HAL
+// The AOSP IsCodecOffloadingEnabled has one caller, inside getHalCodecConfiguration,
+// so the AOSP path needs no separate hook.
 extern "C" bool s25_enabled(const uint8_t *cfg) {
     // Caller owns a mutable local configuration; apply LL's budget before it is sent to HAL.
     s25::ll::limit_hal(const_cast<uint8_t *>(cfg));
-    if (*(const uint32_t *)cfg == 9)
+    if (*(const uint32_t *)cfg == S25_HAL_ADAPTIVE_TYPE)
         return state.selected_seen && s25::adaptive_valid(cfg);
     return tramp_enabled(cfg);
 }
+#endif
 #else
 extern "C" bool s25_validate(const uint8_t *session, const uint8_t *cfg) {
-    if (*(const uint32_t *)cfg == 9)
+    if (*(const uint32_t *)cfg == S25_HAL_ADAPTIVE_TYPE)
         return (*session == 2 || *session == 11) && s25::adaptive_valid(cfg);
     return tramp_validate(session, cfg);
 }

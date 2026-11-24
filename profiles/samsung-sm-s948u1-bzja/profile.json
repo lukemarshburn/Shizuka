@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "id": "sm-s948u1-bzja-aptx-experiment",
+  "implementation": "Samsung HD internal proxy / public Adaptive 7 / R2.2 over the AOSP audio-session HAL",
+  "targets": [
+    {
+      "path": "/apex/com.android.bt/lib64/libbluetooth_jni.so",
+      "sha256": "8040446777e75c99c2f975e7c090900d048aab78e55a5a8fca67dca1ad4c96a8",
+      "local_file": "libbluetooth_jni.so",
+      "role": "patch"
+    },
+    {
+      "path": "/vendor/lib64/libbluetooth_audio_session_aidl.so",
+      "sha256": "344ab7bad8ee9a7a21312fb329871c2e7c0ea8f278347d1aa8ffb05f20c790d3",
+      "local_file": "libbluetooth_audio_session_aidl.so",
+      "role": "patch"
+    },
+    {
+      "path": "/vendor/lib64/btaudio_offload_if.so",
+      "sha256": "b61f20d20e660b199a877e87bcdcc9e0cb16eee3ce49bdc1c281f7b1211798d4",
+      "local_file": "btaudio_offload_if.so",
+      "role": "dependency"
+    },
+    {
+      "path": "/apex/com.android.bt/app/Bluetooth@CP2A.260605.016/Bluetooth.apk",
+      "sha256": "464e86dbd9388e1654abc7c0fd16eca8ee6a24a3862b59b3b8a067e989eab4ac",
+      "local_file": "Bluetooth.apk",
+      "role": "dependency"
+    },
+    {
+      "path": "/apex/com.android.bt/javalib/framework-bluetooth.jar",
+      "sha256": "4abab23a398052c624cb888cb90c2935a0635ffebdaee87a835146e09b49fa96",
+      "local_file": "framework-bluetooth.jar",
+      "role": "dependency"
+    }
+  ],
+  "required_proofs": [
+    "elf-load",
+    "native-negotiation",
+    "hal-config-validation",
+    "downstream-parser",
+    "hci-adaptive-selected"
+  ],
+  "live_activation_ready": false,
+  "driver": "samsung-dzif",
+  "runtime_profile": "samsung-sm-s948u1-bzja",
+  "payloads": {
+    "native": "patched-libbluetooth_jni.so",
+    "hal": "patched-libbluetooth_audio_session_aidl.so",
+    "apk": "patched-Bluetooth.apk",
+    "properties": "runtime.prop"
+  }
+}

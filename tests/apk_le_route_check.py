@@ -6,9 +6,12 @@ import hashlib
 import itertools
 import json
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+from shizuka.profiles import load_profile  # noqa: E402
 REL = "smali/com/android/bluetooth/btservice/AdapterService.smali"
 HELPER = "s25RequiresClassicAudioProfile"
 DESCRIPTOR = "(Landroid/bluetooth/BluetoothDevice;I)Z"
@@ -82,7 +85,7 @@ def execute(body, fixture, helper, arguments=None):
 
 def main():
     definition = json.loads(
-        (ROOT / "profiles/samsung-sm-s931z-dzif/bluetooth-apk.json").read_text()
+        load_profile().apk_patches.read_text(encoding="utf-8")
     )
     entry = next(item for item in definition["files"] if item["path"] == REL)
     insertion = next(
@@ -108,7 +111,7 @@ def main():
             f"LE route policy: {helper_cases} executed helper cases passed; full APK matrix runs during Android build"
         )
         return
-    text = decoded.read_text()
+    text = decoded.read_text(encoding="utf-8")
     assert hashlib.sha256(text.encode()).hexdigest() == entry["after_sha256"]
     assert method(text, HELPER + DESCRIPTOR) == helper
     patched = method(text, METHOD)

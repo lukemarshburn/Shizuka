@@ -15,6 +15,10 @@ public final class CodecPresentationTest {
         check(CodecPresentation.name(profile, false, 13, "Vendor").equals("aptX LL"));
         check(CodecPresentation.name("other", false, 12, "Vendor codec").equals("Vendor codec"));
         check(CodecPresentation.name(profile, true, 13, "LC3").equals("LC3"));
+        String s26 = CodecPresentation.SAMSUNG_S948U1;
+        check(CodecPresentation.losslessSelection(s26, false, 12));
+        check(CodecPresentation.name(s26, false, 13, "Vendor").equals("Vendor"));
+        check("HQ".equals(CodecPresentation.mode(s26, 7, 4096)));
         check(CodecPresentation.name("", false, 12, null).equals("Codec 12"));
         check(CodecPresentation.name("", false, 12, " ").equals("Codec 12"));
         check(CodecPresentation.mode(profile, 12, 0).equals("Lossless request"));
